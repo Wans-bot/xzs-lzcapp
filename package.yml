@@ -1,0 +1,124 @@
+package: cloud.lazycat.app.xzs
+version: 3.9.0-6
+name: XZS
+description: 学之思开源考试系统：老师出题组卷、学员在线答题、成绩与统计都在一个面板里。
+author: mindskip
+license: AGPL-3.0
+homepage: https://github.com/mindskip/xzs-mysql
+min_os_version: 1.6.0
+permissions:
+  required:
+    - net.internet
+locales:
+  zh-CN:
+    name: 学之思考试系统
+    description: 私有化的在线考试系统：老师建题库、出试卷、安排考试，学员在电脑或手机上答题，交卷后自动判分并给出成绩与错题统计。
+    usage: >
+      学之思（XZS）是可私有化部署的考试系统，分管理端和学员端：老师在管理端维护题库、组卷、安排考试并看成绩统计；
+      学员用链接进入学员端答题，单选、多选、判断、填空、简答都能判分（简答题由老师人工评分）。
+
+
+      两个入口（都是应用自身的账号，与微服账号无关）：
+
+      - 打开应用首先看到的是学员端（/student）：**按当前微服用户自动建立并登录一个专属学员账号**，
+        账号名 lzc_<微服用户名>（例如微服用户 wans → 学员账号 lzc_wans），首次打开自动建号，之后直接登录。
+        不同微服账号（含子账号）打开就是各自独立的学员账号，答题记录互不影响。
+      - 管理端在 /admin：上游自带的管理员账号 admin / 123456（管理端仍共用这一个管理员账号）。
+
+      正常情况下不需要手动输入：打开页面会自动完成登录。学员账号的口令由微服用户名派生、固定可复现：
+        口令 = “Lzc-” + sha256(“xzs-lzc:” + 微服用户名) 的前 16 位；例如微服用户 wans → lzc_wans / Lzc-a205be520c7d7573。
+      手动退出登录后可用该账号口令重新进入，也可以在学员端自行注册新账号；管理端用 admin / 123456。
+
+
+      首次使用：
+
+      1. 打开应用首先是学员端；老师用管理端（应用地址后加 /admin，已自动登录）来配置内容。
+      2. 进入「题库」新建题目（单选 / 多选 / 判断 / 填空 / 简答），也可以按分类批量导入。
+      3. 进入「试卷」组卷：手动选题或按规则随机抽题，设置总分与时长。
+      4. 进入「任务」安排考试：选试卷、选学员（或让学员凭链接参加），设置起止时间。
+      5. 进入「成绩」看每场考试的分数、答题情况与错题统计，简答题在这里人工评分。
+      6. 学员端入口是同一个应用地址下的 /student。
+
+      常用操作：
+
+      - 题库：分类树 + 题目编辑，支持题干图片、数学公式。
+      - 组卷：手动挑选或按难度/知识点随机抽题。
+      - 任务：按班级或指定学员安排考试，可限时、可查看作答进度。
+      - 成绩：单场统计、学员排名、错题分析，可导出。
+      - 数据持久化：数据库在 /lzcapp/var 下，重启与升级都不会丢。
+
+      说明与限制：
+
+      - 本包是上游官方发行版的移植：管理端与学员端是上游自带的中文界面，未做汉化或改版。
+      - 管理端默认账号是上游数据库脚本自带的 admin / 123456，装好请改成自己的密码；学员端账号按微服用户自动创建，不需要共用口令。
+      - 界面为简体中文（上游原生中文），不需要切换语言。
+      - 微信小程序端、短信、对象存储（七牛）等需要外部账号的功能未接入，管理端里相关配置留空即可。
+  en-US:
+    name: XZS Exam System
+    description: >-
+      A self-hosted online exam system: build a question bank, compose papers,
+      schedule exams, and let students answer on desktop or mobile with automatic
+      grading and statistics.
+    usage: >
+      XZS is a self-hostable exam system with an admin side and a student side.
+      Teachers keep the question bank, compose papers, schedule exams and read
+      the statistics; students open the student portal and answer. Single
+      choice, multiple choice, true/false, fill-in and short answers are graded
+      automatically, short answers by the teacher.
+
+
+      Two entrances (both use the app's own accounts, unrelated to your box
+      account):
+
+      - Opening the app shows the student portal (/student), which creates and
+        signs in a dedicated student account for the current box user: the
+        account name is lzc_<box-user> (box user wans -> student account
+        lzc_wans). It is created on first open and reused afterwards, so
+        different box accounts (including sub-accounts) each get their own
+        student identity and their exam records stay separate.
+      - The admin side lives at /admin: upstream administrator admin / 123456
+        (the admin side still shares this one administrator account).
+
+      You normally do not type these: pages sign in automatically. The student
+      password is derived from the box user name and is reproducible:
+        password = "Lzc-" + first 16 hex chars of sha256("xzs-lzc:" + box user);
+        e.g. box user wans -> lzc_wans / Lzc-a205be520c7d7573.
+      After signing out manually you can sign back in with those credentials,
+      register another account in the student portal, or use admin / 123456 for
+      the admin side.
+
+
+      Getting started:
+
+      1. The app opens on the student portal; teachers use the admin side
+         (append /admin to the app address, already signed in).
+      2. Question bank: create questions (single choice, multiple choice,
+         true/false, fill-in, short answer) or import them in bulk.
+      3. Papers: compose a paper by picking questions or by random rules, set
+         the score and duration.
+      4. Tasks: schedule an exam by choosing a paper and the students, with a
+         start and end time.
+      5. Results: per-exam scores, answers and wrong-answer statistics; grade
+         short answers here.
+      6. The student portal lives at /student on the same address.
+
+      Common tasks:
+
+      - Question bank: category tree plus an editor with images and math
+         formulas.
+      - Paper composition: manual selection or random draw by difficulty.
+      - Tasks: exams per class or per student, time limited, with progress.
+      - Results: per-exam statistics, ranking, wrong-answer analysis, export.
+      - Persistence: the database lives under /lzcapp/var; restarts and
+         upgrades keep it.
+
+      Notes and limits:
+
+      - This package ports the upstream release as is: the admin and student
+         interfaces are the upstream Chinese UI, not a translation.
+      - The admin side keeps the upstream SQL account admin / 123456 - change
+         it after installation. Student accounts are created per box user, so
+         there is no shared student password.
+      - The UI is Simplified Chinese, as shipped upstream.
+      - WeChat mini program, SMS and object storage (Qiniu) need external
+         accounts and are not wired up; leave those settings empty.

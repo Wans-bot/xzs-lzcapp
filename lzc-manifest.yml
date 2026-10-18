@@ -1,0 +1,158 @@
+application:
+  subdomain: xzs
+  routes:
+    - /=http://xzs.cloud.lazycat.app.xzs.lzcapp:8000
+  health_check:
+    test_url: http://xzs.cloud.lazycat.app.xzs.lzcapp:8000/student
+    start_period: 300s
+    timeout: 10s
+  injects:
+    # ── 网盘文件桥接（request 阶段）────────────────────────────────────────
+    # 官方《网盘文件选择器/自动拦截》要求 request 与 browser 两侧成对配置：
+    # 只配 browser 侧时自有目录「看起来能用」，共享目录按 owner 切换必然失败。
+    - id: lazycat-file-bridge
+      'on': request
+      auth_required: false
+      when:
+        - /__lazycat_file_bridge/*
+      do:
+        - src: >
+            const bridgePrefix = "/__lazycat_file_bridge";
+
+            const requestHost = String(ctx.request.host ||
+            "").split(":")[0].toLowerCase();
+
+            const firstDot = requestHost.indexOf(".");
+
+            const method = String(ctx.request.method || "").toUpperCase();
+
+            if (firstDot <= 0 || !requestHost.endsWith(".heiyu.space") ||
+            !["GET", "HEAD", "PUT"].includes(method)) {
+              ctx.response.send(["GET", "HEAD", "PUT"].includes(method) ? 400 : 405, "Invalid LazyCat file bridge request");
+              return;
+            }
+
+            const boxDomain = requestHost.slice(firstDot + 1);
+
+            ctx.headers.del("Origin");
+
+            ctx.headers.del("Referer");
+
+            ctx.proxy.to("https://file." + boxDomain, { path: "/files/home" +
+            ctx.request.path.slice(bridgePrefix.length), query:
+            ctx.request.raw_query, use_target_host: true, timeout_ms: 120000,
+            on_fail: "error" });
+    # 官方选择器脚本：管理端题目编辑器有图片上传（<input type=file>），
+    # 题库/成绩页有导出下载（a[download]），两类入口都交给官方选择器接管。
+    - id: open-save-chooser
+      'on': browser
+      # 本应用页面不公开（无 public_path），匿名请求拿不到 HTML；
+      # 保持默认 auth_required=true，避免无票据上下文调用平台 API 报 GrpcWebError；
+      # 已登录的评审客户端照常执行。
+      when:
+        - /*
+      do:
+        - src: >-
+            file:///lzcapp/pkg/content/lazycat-injects/lzc-file-chooser-inject.js
+          params:
+            diskRoot: /_lzc/files/home
+            fileBridgeRoot: /__lazycat_file_bridge
+            fallbackMime: application/octet-stream
+            locale: auto
+            hooks:
+              fileSystemAccess: true
+              fileInput: true
+              downloadAnchor: true
+    # ── 免密登录（首次初始化 + 自动填充 + 账号切换）────────────────────────
+    # XZS 自带账号体系（管理端 t_user 里的 admin）；账号由上游数据库脚本建好，
+    # 这里在管理端登录页自动填充并提交，并提供「切换账号」控件
+    # （停用自动登录 + 真登出），避免把用户钉死在同一个账号上。
+    - id: xzs-autologin
+      'on': browser
+      auth_required: false
+      # 免密与账号隔离（同一套 /api/user/login）：
+      #   管理端 /admin* → admin / 123456（上游 SQL 里的管理员，仍共用）
+      #   学员端 /student* → 按 ctx.safe_uid 派生的专属学员账号 lzc_<微服用户名>，
+      #     口令 = "Lzc-" + sha256("xzs-lzc:" + 用户名) 前 16 位；首次打不开就调
+      #     POST /api/student/user/register 建号（评审 #20529：原来所有人共用 student 账号）。
+      #     params 里的 studentUser/studentPassword 仅作为拿不到 safe_uid 时的兜底。
+      when:
+        - /admin
+        - /admin/*
+        - /student
+        - /student/*
+        - /index.html
+      do:
+        - src: file:///lzcapp/pkg/content/lazycat-injects/xzs-autologin.js
+          params:
+            user: admin
+            password: '123456'
+            studentUser: student
+            studentPassword: '123456'
+services:
+  # ── 数据库（MySQL 8，官方镜像中转）──────────────────────────────────────
+  xzs-db:
+    image: registry.lazycat.cloud/wans/library/mysql:720d8e3ace6b770d
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: '{{ printf "%.24s" (stable_secret "XZS_DB_PASSWORD") }}'
+    command: '--character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci --default-time-zone=+08:00 --max_connections=200'
+    binds:
+      - /lzcapp/var/xzs-mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  # ── 首次初始化（幂等）：等数据库就绪后导入上游建库脚本 ────────────────────
+  # 上游 SQL（sql/xzs-mysql.sql，含建库、13 张表与管理员账号）不进镜像，
+  # 由本服务在首次安装时导入；已存在表结构时直接跳过，可重复执行。
+  xzs-init:
+    image: registry.lazycat.cloud/wans/library/mysql:720d8e3ace6b770d
+    depends_on:
+      - xzs-db
+    entrypoint: /bin/bash
+    command: /lzcapp/pkg/content/init-db.sh
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_PWD: '{{ printf "%.24s" (stable_secret "XZS_DB_PASSWORD") }}'
+      LZC_DB_HOST: xzs-db
+      LZC_DB_USER: root
+      LZC_SQL_FILE: /lzcapp/pkg/content/sql/xzs-mysql.sql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -f /tmp/init-db.done
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # ── 应用（Spring Boot，管理端 /admin 与学员端 /student 同一个端口）──────
+  xzs:
+    image: registry.lazycat.cloud/wans/mindskip/java:bf0b07898760e178
+    depends_on:
+      - xzs-db
+      - xzs-init
+    entrypoint: /bin/bash
+    command: /lzcapp/pkg/content/start-app.sh
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_DATASOURCE_URL: >-
+        jdbc:mysql://xzs-db:3306/xzs?useSSL=false&useUnicode=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&allowPublicKeyRetrieval=true&allowMultiQueries=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: '{{ printf "%.24s" (stable_secret "XZS_DB_PASSWORD") }}'
+    binds:
+      - /lzcapp/var/xzs-log:/usr/log/xzs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -o /dev/null http://127.0.0.1:8000/student || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
