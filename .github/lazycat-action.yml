@@ -21,7 +21,7 @@ images:
   - id: app
     target: service
     service: xzs
-    source: mindskip/java
+    source: registry.cn-hangzhou.aliyuncs.com/mindskip/xzs
     channel: stable
     tag_regex: '^v?\d+\.\d+\.\d+$'
     sort: semver
